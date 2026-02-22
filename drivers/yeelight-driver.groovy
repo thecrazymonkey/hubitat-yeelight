@@ -208,7 +208,7 @@ def handleCommandResponse(Map data) {
 
     // Purge stale entries older than 30 seconds
     Long cutoff = now() - 30000
-    pending.removeAll { k, v -> v.ts != null && v.ts < cutoff }
+    pending.findAll { k, v -> v.ts != null && v.ts < cutoff }.each { k, v -> pending.remove(k) }
 
     if (cmd) pending.remove(idStr)
     atomicState.pendingCmds = pending
