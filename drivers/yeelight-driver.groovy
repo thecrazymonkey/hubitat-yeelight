@@ -441,11 +441,12 @@ def schedulePoll() {
 // ---------------------------------------------------------------------------
 
 private void ensureOn() {
-    if (device.currentValue("switch") != "on") {
-        Integer duration = Math.max(30, (transitionTime ?: 400) as Integer)
-        sendEvent(name: "switch", value: "on") // optimistic
-        sendCommand("set_power", ["on", "smooth", duration])
-    }
+    // Always send set_power — cached switch state may be stale if bulb was
+    // turned off externally (Yeelight app, physical switch, etc.).
+    // set_power "on" is idempotent when the bulb is already on.
+    sendCommand("set_power", ["on", "smooth", 30])
+    sendEvent(name: "switch", value: "on")
+    pauseExecution(100) // let bulb process power-on before next command
 }
 
 private Integer safeInteger(Object val) {
