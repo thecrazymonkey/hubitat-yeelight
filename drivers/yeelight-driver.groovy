@@ -8,6 +8,7 @@
 
 import groovy.json.JsonSlurper
 import groovy.json.JsonOutput
+import groovy.transform.Field
 import hubitat.helper.ColorUtils
 
 metadata {
