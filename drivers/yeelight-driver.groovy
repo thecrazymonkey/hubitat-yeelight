@@ -230,12 +230,12 @@ def handlePropsNotification(Map props) {
     logDebug "handlePropsNotification: ${props}"
 
     if (props.containsKey("power"))      updateSwitchState(props.power as String)
-    if (props.containsKey("bright"))     updateLevel(props.bright as Integer)
-    if (props.containsKey("ct"))         updateColorTemp(props.ct as Integer)
-    if (props.containsKey("rgb"))        updateRgb(props.rgb as Long)
-    if (props.containsKey("hue"))        updateHue(props.hue as Integer)
-    if (props.containsKey("sat"))        updateSaturation(props.sat as Integer)
-    if (props.containsKey("color_mode")) updateColorMode(props.color_mode as Integer)
+    if (props.containsKey("bright"))     safeInteger(props.bright)?.with { updateLevel(it) }
+    if (props.containsKey("ct"))         safeInteger(props.ct)?.with { updateColorTemp(it) }
+    if (props.containsKey("rgb"))        safeLong(props.rgb)?.with { updateRgb(it) }
+    if (props.containsKey("hue"))        safeInteger(props.hue)?.with { updateHue(it) }
+    if (props.containsKey("sat"))        safeInteger(props.sat)?.with { updateSaturation(it) }
+    if (props.containsKey("color_mode")) safeInteger(props.color_mode)?.with { updateColorMode(it) }
 }
 
 // ---------------------------------------------------------------------------
@@ -416,6 +416,16 @@ def schedulePoll() {
 // ---------------------------------------------------------------------------
 // Utility helpers
 // ---------------------------------------------------------------------------
+
+private Integer safeInteger(Object val) {
+    if (val == null || val.toString().trim() == "") return null
+    try { return val.toString().trim() as Integer } catch (e) { return null }
+}
+
+private Long safeLong(Object val) {
+    if (val == null || val.toString().trim() == "") return null
+    try { return val.toString().trim() as Long } catch (e) { return null }
+}
 
 private Integer clamp(Integer value, Integer min, Integer max) {
     return Math.min(max, Math.max(min, value))
