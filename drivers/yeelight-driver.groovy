@@ -165,7 +165,7 @@ private void sendJsonRpc(String method, List params, Map pendingMeta) {
 }
 
 def sendCommand(String method, List params) {
-    sendJsonRpc(method, params, [method: method])
+    sendJsonRpc(method, params, [method: method, params: params])
 }
 
 def sendGetProp(List propNames) {
@@ -202,9 +202,18 @@ def parse(String msg) {
 }
 
 def handleErrorResponse(Map data) {
-    String idStr = data.id?.toString()
+    Integer code = data.error?.code as Integer
+    String message = data.error?.message ?: "unknown"
+
+    // id:null "invalid command" is a known Yeelight firmware quirk — ignore
+    if (data.id == null) {
+        logDebug "ignoring id:null error (${code}: ${message})"
+        return
+    }
+
+    String idStr = data.id.toString()
     Map pending = atomicState.pendingCmds ?: [:]
-    Map cmd = idStr ? pending[idStr] : null
+    Map cmd = pending[idStr]
     String method = cmd?.method ?: "unknown"
 
     if (cmd) {
@@ -212,9 +221,28 @@ def handleErrorResponse(Map data) {
         atomicState.pendingCmds = pending
     }
 
-    Integer code = data.error?.code as Integer
-    String message = data.error?.message ?: "unknown"
+    // Error -5000 means the bulb is off — turn on and retry the command
+    if (code == -5000 && cmd?.params && !state.retrying) {
+        log.info "${device.displayName}: '${method}' failed (bulb off) — powering on and retrying"
+        state.retrying = true
+        state.retryCmd = [method: method, params: cmd.params]
+        sendCommand("set_power", ["on", "smooth", 30])
+        sendEvent(name: "switch", value: "on")
+        runInMillis(500, "retryFailedCommand")
+        return
+    }
+
     log.warn "${device.displayName}: command '${method}' (id:${idStr}) failed — error ${code}: ${message}"
+}
+
+def retryFailedCommand() {
+    Map cmd = state.retryCmd
+    state.retrying = false
+    state.retryCmd = null
+    if (cmd) {
+        logDebug "retryFailedCommand: ${cmd.method}"
+        sendCommand(cmd.method, cmd.params as List)
+    }
 }
 
 def handleCommandResponse(Map data) {
@@ -352,7 +380,7 @@ def setLevel(BigDecimal level, BigDecimal rate = null) {
         off()
         return
     }
-    ensureOn()
+
     Integer duration = rate != null ? Math.max(30, Math.round(rate * 1000) as Integer) : Math.max(30, (transitionTime ?: 400) as Integer)
     sendEvent(name: "level", value: bright, unit: "%")
     sendCommand("set_bright", [bright, "smooth", duration])
@@ -360,7 +388,7 @@ def setLevel(BigDecimal level, BigDecimal rate = null) {
 
 def setHue(BigDecimal hue) {
     logDebug "setHue(${hue})"
-    ensureOn()
+
     Integer hubHue   = clamp(Math.round(hue) as Integer, 0, 100)
     Integer yeelightHue = Math.round(hubHue * 3.59) as Integer
     Integer sat      = (device.currentValue("saturation") ?: 100) as Integer
@@ -372,7 +400,7 @@ def setHue(BigDecimal hue) {
 
 def setSaturation(BigDecimal saturation) {
     logDebug "setSaturation(${saturation})"
-    ensureOn()
+
     Integer sat      = clamp(Math.round(saturation) as Integer, 0, 100)
     Integer hubHue   = (device.currentValue("hue") ?: 0) as Integer
     Integer yeelightHue = Math.round(hubHue * 3.59) as Integer
@@ -384,7 +412,7 @@ def setSaturation(BigDecimal saturation) {
 
 def setColor(Map colorMap) {
     logDebug "setColor(${colorMap})"
-    ensureOn()
+
     Integer hubHue   = (colorMap.hue        ?: 0) as Integer
     Integer sat      = (colorMap.saturation ?: 100) as Integer
     Integer yeelightHue = Math.round(hubHue * 3.59) as Integer
@@ -400,7 +428,7 @@ def setColor(Map colorMap) {
 
 def setColorTemperature(BigDecimal temperature, BigDecimal level = null, BigDecimal rate = null) {
     logDebug "setColorTemperature(${temperature}, ${level}, ${rate})"
-    ensureOn()
+
     Integer ct       = clamp(Math.round(temperature) as Integer, CT_MIN, CT_MAX)
     Integer duration = rate != null ? Math.max(30, Math.round(rate * 1000) as Integer) : Math.max(30, (transitionTime ?: 400) as Integer)
     sendEvent(name: "colorTemperature", value: ct, unit: "K")
@@ -439,15 +467,6 @@ def schedulePoll() {
 // ---------------------------------------------------------------------------
 // Utility helpers
 // ---------------------------------------------------------------------------
-
-private void ensureOn() {
-    // Always send set_power — cached switch state may be stale if bulb was
-    // turned off externally (Yeelight app, physical switch, etc.).
-    // set_power "on" is idempotent when the bulb is already on.
-    sendCommand("set_power", ["on", "smooth", 30])
-    sendEvent(name: "switch", value: "on")
-    pauseExecution(100) // let bulb process power-on before next command
-}
 
 private Integer safeInteger(Object val) {
     if (val == null || val.toString().trim() == "") return null
