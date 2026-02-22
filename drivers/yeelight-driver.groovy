@@ -221,14 +221,22 @@ def handleErrorResponse(Map data) {
         atomicState.pendingCmds = pending
     }
 
-    // Error -5000 means the bulb is off — turn on and retry the command
+    // Error -5000 means the bulb is off — turn on and retry the command (once)
     if (code == -5000 && cmd?.params && !state.retrying) {
         log.info "${device.displayName}: '${method}' failed (bulb off) — powering on and retrying"
         state.retrying = true
         state.retryCmd = [method: method, params: cmd.params]
-        sendCommand("set_power", ["on", "smooth", 30])
+        sendCommand("set_power", ["on", "smooth", 500])
         sendEvent(name: "switch", value: "on")
-        runInMillis(500, "retryFailedCommand")
+        runInMillis(1500, "retryFailedCommand")
+        return
+    }
+
+    // Clear retry state on non-retryable errors
+    if (state.retrying) {
+        log.warn "${device.displayName}: retry of '${method}' also failed — error ${code}: ${message}"
+        state.retrying = false
+        state.retryCmd = null
         return
     }
 
@@ -237,8 +245,8 @@ def handleErrorResponse(Map data) {
 
 def retryFailedCommand() {
     Map cmd = state.retryCmd
-    state.retrying = false
     state.retryCmd = null
+    // state.retrying stays true to prevent infinite retry — cleared on success or second failure
     if (cmd) {
         logDebug "retryFailedCommand: ${cmd.method}"
         sendCommand(cmd.method, cmd.params as List)
@@ -248,6 +256,11 @@ def retryFailedCommand() {
 def handleCommandResponse(Map data) {
     String idStr = data.id?.toString()
     if (!idStr) return
+
+    // Successful response clears retry state
+    if (state.retrying) {
+        state.retrying = false
+    }
 
     Map pending = atomicState.pendingCmds ?: [:]
     Map cmd     = pending[idStr]
