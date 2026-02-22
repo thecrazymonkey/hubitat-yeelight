@@ -192,11 +192,29 @@ def parse(String msg) {
         return
     }
 
-    if (data.containsKey("result")) {
+    if (data.containsKey("error")) {
+        handleErrorResponse(data)
+    } else if (data.containsKey("result")) {
         handleCommandResponse(data)
     } else if (data.method == "props") {
         handlePropsNotification(data.params)
     }
+}
+
+def handleErrorResponse(Map data) {
+    String idStr = data.id?.toString()
+    Map pending = atomicState.pendingCmds ?: [:]
+    Map cmd = idStr ? pending[idStr] : null
+    String method = cmd?.method ?: "unknown"
+
+    if (cmd) {
+        pending.remove(idStr)
+        atomicState.pendingCmds = pending
+    }
+
+    Integer code = data.error?.code as Integer
+    String message = data.error?.message ?: "unknown"
+    log.warn "${device.displayName}: command '${method}' (id:${idStr}) failed — error ${code}: ${message}"
 }
 
 def handleCommandResponse(Map data) {
@@ -334,6 +352,7 @@ def setLevel(BigDecimal level, BigDecimal rate = null) {
         off()
         return
     }
+    ensureOn()
     Integer duration = rate != null ? Math.max(30, Math.round(rate * 1000) as Integer) : Math.max(30, (transitionTime ?: 400) as Integer)
     sendEvent(name: "level", value: bright, unit: "%")
     sendCommand("set_bright", [bright, "smooth", duration])
@@ -341,6 +360,7 @@ def setLevel(BigDecimal level, BigDecimal rate = null) {
 
 def setHue(BigDecimal hue) {
     logDebug "setHue(${hue})"
+    ensureOn()
     Integer hubHue   = clamp(Math.round(hue) as Integer, 0, 100)
     Integer yeelightHue = Math.round(hubHue * 3.59) as Integer
     Integer sat      = (device.currentValue("saturation") ?: 100) as Integer
@@ -352,6 +372,7 @@ def setHue(BigDecimal hue) {
 
 def setSaturation(BigDecimal saturation) {
     logDebug "setSaturation(${saturation})"
+    ensureOn()
     Integer sat      = clamp(Math.round(saturation) as Integer, 0, 100)
     Integer hubHue   = (device.currentValue("hue") ?: 0) as Integer
     Integer yeelightHue = Math.round(hubHue * 3.59) as Integer
@@ -363,6 +384,7 @@ def setSaturation(BigDecimal saturation) {
 
 def setColor(Map colorMap) {
     logDebug "setColor(${colorMap})"
+    ensureOn()
     Integer hubHue   = (colorMap.hue        ?: 0) as Integer
     Integer sat      = (colorMap.saturation ?: 100) as Integer
     Integer yeelightHue = Math.round(hubHue * 3.59) as Integer
@@ -378,6 +400,7 @@ def setColor(Map colorMap) {
 
 def setColorTemperature(BigDecimal temperature, BigDecimal level = null, BigDecimal rate = null) {
     logDebug "setColorTemperature(${temperature}, ${level}, ${rate})"
+    ensureOn()
     Integer ct       = clamp(Math.round(temperature) as Integer, CT_MIN, CT_MAX)
     Integer duration = rate != null ? Math.max(30, Math.round(rate * 1000) as Integer) : Math.max(30, (transitionTime ?: 400) as Integer)
     sendEvent(name: "colorTemperature", value: ct, unit: "K")
@@ -416,6 +439,14 @@ def schedulePoll() {
 // ---------------------------------------------------------------------------
 // Utility helpers
 // ---------------------------------------------------------------------------
+
+private void ensureOn() {
+    if (device.currentValue("switch") != "on") {
+        Integer duration = Math.max(30, (transitionTime ?: 400) as Integer)
+        sendEvent(name: "switch", value: "on") // optimistic
+        sendCommand("set_power", ["on", "smooth", duration])
+    }
+}
 
 private Integer safeInteger(Object val) {
     if (val == null || val.toString().trim() == "") return null
