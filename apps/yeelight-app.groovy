@@ -129,7 +129,7 @@ def addDevicePage() {
                   type: "text",
                   title: "Bulb IP Address",
                   description: "e.g. 192.168.1.100",
-                  required: true,
+                  required: false,
                   submitOnChange: false
 
             input name: "newDeviceName",
