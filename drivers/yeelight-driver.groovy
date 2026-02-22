@@ -221,35 +221,54 @@ def handleErrorResponse(Map data) {
         atomicState.pendingCmds = pending
     }
 
-    // Error -5000 means the bulb is off — turn on and retry the command (once)
+    // Error -5000 means the bulb is off — use set_scene to atomically power
+    // on and apply the setting in one command (no timing race).
     if (code == -5000 && cmd?.params && !state.retrying) {
-        log.info "${device.displayName}: '${method}' failed (bulb off) — powering on and retrying"
         state.retrying = true
-        state.retryCmd = [method: method, params: cmd.params]
-        sendCommand("set_power", ["on", "smooth", 500])
-        sendEvent(name: "switch", value: "on")
-        runInMillis(1500, "retryFailedCommand")
+        List origParams = cmd.params as List
+        List sceneParams = buildSceneParams(method, origParams)
+        if (sceneParams) {
+            log.info "${device.displayName}: '${method}' failed (bulb off) — retrying via set_scene"
+            sendCommand("set_scene", sceneParams)
+            sendEvent(name: "switch", value: "on")
+        } else {
+            log.warn "${device.displayName}: '${method}' failed (bulb off) — cannot build set_scene, giving up"
+            state.retrying = false
+        }
         return
     }
 
-    // Clear retry state on non-retryable errors
     if (state.retrying) {
-        log.warn "${device.displayName}: retry of '${method}' also failed — error ${code}: ${message}"
+        log.warn "${device.displayName}: set_scene retry of '${method}' also failed — error ${code}: ${message}"
         state.retrying = false
-        state.retryCmd = null
         return
     }
 
     log.warn "${device.displayName}: command '${method}' (id:${idStr}) failed — error ${code}: ${message}"
 }
 
-def retryFailedCommand() {
-    Map cmd = state.retryCmd
-    state.retryCmd = null
-    // state.retrying stays true to prevent infinite retry — cleared on success or second failure
-    if (cmd) {
-        logDebug "retryFailedCommand: ${cmd.method}"
-        sendCommand(cmd.method, cmd.params as List)
+private List buildSceneParams(String method, List origParams) {
+    switch (method) {
+        case "set_ct_abx":
+            // set_scene "ct" <ct_value> <brightness>
+            Integer ct     = origParams[0] as Integer
+            Integer bright = (device.currentValue("level") ?: 100) as Integer
+            return ["ct", ct, bright]
+
+        case "set_hsv":
+            // set_scene "hsv" <hue> <saturation>
+            Integer hue = origParams[0] as Integer
+            Integer sat = origParams[1] as Integer
+            return ["hsv", hue, sat]
+
+        case "set_bright":
+            // set_scene "ct" <current_ct> <brightness>
+            Integer b  = origParams[0] as Integer
+            Integer ct = (device.currentValue("colorTemperature") ?: 4000) as Integer
+            return ["ct", ct, b]
+
+        default:
+            return null
     }
 }
 
