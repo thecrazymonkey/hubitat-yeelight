@@ -311,6 +311,10 @@ def parseSsdpResponse(String description) {
 // ---------------------------------------------------------------------------
 
 private String createYeelightDevice(String ip, String name) {
+    if (!(ip ==~ /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)) {
+        log.warn "Yeelight Manager: invalid IP address '${ip}'"
+        return "Error: '${ip}' is not a valid IP address."
+    }
     String dni = "yeelight-${ip.replace('.', '-')}"
 
     if (getChildDevice(dni)) {

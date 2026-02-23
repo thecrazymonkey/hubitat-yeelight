@@ -96,6 +96,8 @@ def initialize() {
 
     atomicState.msgId       = 1
     atomicState.pendingCmds = [:]
+    state.retrying          = false
+    state.retryCmd          = null
 
     unschedule()
 
@@ -164,11 +166,11 @@ private void sendJsonRpc(String method, List params, Map pendingMeta) {
     sendHubCommand(new hubitat.device.HubAction("${json}\r\n", hubitat.device.Protocol.TELNET))
 }
 
-def sendCommand(String method, List params) {
+private void sendCommand(String method, List params) {
     sendJsonRpc(method, params, [method: method, params: params])
 }
 
-def sendGetProp(List propNames) {
+private void sendGetProp(List propNames) {
     sendJsonRpc("get_prop", propNames, [method: "get_prop", props: propNames])
 }
 
@@ -262,10 +264,16 @@ private List buildSceneParams(String method, List origParams) {
             return ["hsv", hue, sat]
 
         case "set_bright":
-            // set_scene "ct" <current_ct> <brightness>
-            Integer b  = origParams[0] as Integer
-            Integer ct = (device.currentValue("colorTemperature") ?: 4000) as Integer
-            return ["ct", ct, b]
+            Integer b = origParams[0] as Integer
+            String mode = device.currentValue("colorMode") ?: "CT"
+            if (mode == "HSV") {
+                Integer hue = Math.round(((device.currentValue("hue") ?: 0) as Integer) * 3.59) as Integer
+                Integer sat = (device.currentValue("saturation") ?: 100) as Integer
+                return ["hsv", hue, sat]
+            } else {
+                Integer ct = clamp((device.currentValue("colorTemperature") ?: 4000) as Integer, CT_MIN, CT_MAX)
+                return ["ct", ct, b]
+            }
 
         default:
             return null
@@ -420,7 +428,6 @@ def setLevel(BigDecimal level, BigDecimal rate = null) {
 
 def setHue(BigDecimal hue) {
     logDebug "setHue(${hue})"
-
     Integer hubHue   = clamp(Math.round(hue) as Integer, 0, 100)
     Integer yeelightHue = Math.round(hubHue * 3.59) as Integer
     Integer sat      = (device.currentValue("saturation") ?: 100) as Integer
@@ -432,7 +439,6 @@ def setHue(BigDecimal hue) {
 
 def setSaturation(BigDecimal saturation) {
     logDebug "setSaturation(${saturation})"
-
     Integer sat      = clamp(Math.round(saturation) as Integer, 0, 100)
     Integer hubHue   = (device.currentValue("hue") ?: 0) as Integer
     Integer yeelightHue = Math.round(hubHue * 3.59) as Integer
@@ -444,7 +450,6 @@ def setSaturation(BigDecimal saturation) {
 
 def setColor(Map colorMap) {
     logDebug "setColor(${colorMap})"
-
     Integer hubHue   = (colorMap.hue        ?: 0) as Integer
     Integer sat      = (colorMap.saturation ?: 100) as Integer
     Integer yeelightHue = Math.round(hubHue * 3.59) as Integer
