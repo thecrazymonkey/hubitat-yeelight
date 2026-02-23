@@ -2,13 +2,13 @@
  * Yeelight Manager — Hubitat Parent App
  * Manages Yeelight WiFi Bulb child devices via LAN control
  *
- * Namespace : ivanjx
+ * Namespace : thecrazymonkey
  * Author    : Ivan
  */
 
 definition(
     name            : "Yeelight Manager",
-    namespace       : "ivanjx",
+    namespace       : "thecrazymonkey",
     author          : "Ivan",
     description     : "Manage Yeelight smart bulbs on your local network",
     category        : "Lighting",
@@ -324,7 +324,7 @@ private String createYeelightDevice(String ip, String name) {
 
     try {
         def child = addChildDevice(
-            "ivanjx",
+            "thecrazymonkey",
             "Yeelight WiFi Bulb",
             dni,
             [name: name, label: name, isComponent: false]

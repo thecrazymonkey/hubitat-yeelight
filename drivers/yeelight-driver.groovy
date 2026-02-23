@@ -2,7 +2,7 @@
  * Yeelight WiFi Bulb — Hubitat Driver
  * LAN control via Yeelight JSON-RPC over TCP port 55443
  *
- * Namespace : ivanjx
+ * Namespace : thecrazymonkey
  * Author    : Ivan
  */
 
@@ -14,7 +14,7 @@ import hubitat.helper.ColorUtils
 metadata {
     definition(
         name      : "Yeelight WiFi Bulb",
-        namespace : "ivanjx",
+        namespace : "thecrazymonkey",
         author    : "Ivan",
         description: "LAN control for Yeelight smart bulbs via TCP port 55443"
     ) {
