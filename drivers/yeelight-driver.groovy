@@ -218,10 +218,9 @@ def handleErrorResponse(Map data) {
     Map cmd = pending[idStr]
     String method = cmd?.method ?: "unknown"
 
-    if (cmd) {
-        pending.remove(idStr)
-        atomicState.pendingCmds = pending
-    }
+    if (cmd) pending.remove(idStr)
+    purgeStalePendingCmds(pending)
+    atomicState.pendingCmds = pending
 
     // Error -5000 means the bulb is off — use set_scene to atomically power
     // on and apply the setting in one command (no timing race).
@@ -292,11 +291,8 @@ def handleCommandResponse(Map data) {
     Map pending = atomicState.pendingCmds ?: [:]
     Map cmd     = pending[idStr]
 
-    // Purge stale entries older than 30 seconds
-    Long cutoff = now() - 30000
-    pending.findAll { k, v -> v.ts != null && v.ts < cutoff }.each { k, v -> pending.remove(k) }
-
     if (cmd) pending.remove(idStr)
+    purgeStalePendingCmds(pending)
     atomicState.pendingCmds = pending
 
     if (!cmd) return
@@ -504,6 +500,11 @@ def schedulePoll() {
 // ---------------------------------------------------------------------------
 // Utility helpers
 // ---------------------------------------------------------------------------
+
+private void purgeStalePendingCmds(Map pending) {
+    Long cutoff = now() - 30000
+    pending.findAll { k, v -> v.ts != null && v.ts < cutoff }.each { k, v -> pending.remove(k) }
+}
 
 private Integer safeInteger(Object val) {
     if (val == null || val.toString().trim() == "") return null
