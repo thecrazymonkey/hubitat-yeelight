@@ -71,6 +71,7 @@ metadata {
 @Field static final Integer CT_MIN          = 1700
 @Field static final Integer CT_MAX          = 6500
 @Field static final Integer RECONNECT_DELAY = 30
+@Field static final Double  HUE_SCALE       = 3.59
 
 // ---------------------------------------------------------------------------
 // Lifecycle
@@ -97,7 +98,6 @@ def initialize() {
     atomicState.msgId       = 1
     atomicState.pendingCmds = [:]
     state.retrying          = false
-    state.retryCmd          = null
 
     unschedule()
 
@@ -266,7 +266,7 @@ private List buildSceneParams(String method, List origParams) {
             Integer b = origParams[0] as Integer
             String mode = device.currentValue("colorMode") ?: "CT"
             if (mode == "HSV") {
-                Integer hue = Math.round(((device.currentValue("hue") ?: 0) as Integer) * 3.59) as Integer
+                Integer hue = hubToYeelightHue((device.currentValue("hue") ?: 0) as Integer)
                 Integer sat = (device.currentValue("saturation") ?: 100) as Integer
                 return ["hsv", hue, sat]
             } else {
@@ -360,9 +360,10 @@ def updateRgb(Long rgb) {
 
 def updateHue(Integer hue) {
     if (hue == null) return
-    Integer hubHue = Math.round(hue / 3.59) as Integer
+    Integer hubHue = yeelightToHubHue(hue)
     descLog "${device.displayName} hue is ${hubHue}"
     sendEvent(name: "hue", value: hubHue)
+    setGenericColorNameFromHSV(hubHue, (device.currentValue("saturation") ?: 100) as Integer)
 }
 
 def updateSaturation(Integer sat) {
@@ -391,15 +392,13 @@ def updateColorMode(Integer mode) {
 def on() {
     logDebug "on()"
     sendEvent(name: "switch", value: "on")   // optimistic
-    Integer duration = Math.max(30, (transitionTime ?: 400) as Integer)
-    sendCommand("set_power", ["on", "smooth", duration])
+    sendCommand("set_power", ["on", "smooth", resolveDuration()])
 }
 
 def off() {
     logDebug "off()"
     sendEvent(name: "switch", value: "off")  // optimistic
-    Integer duration = Math.max(30, (transitionTime ?: 400) as Integer)
-    sendCommand("set_power", ["off", "smooth", duration])
+    sendCommand("set_power", ["off", "smooth", resolveDuration()])
 }
 
 def toggle() {
@@ -417,43 +416,36 @@ def setLevel(BigDecimal level, BigDecimal rate = null) {
         return
     }
 
-    Integer duration = rate != null ? Math.max(30, Math.round(rate * 1000) as Integer) : Math.max(30, (transitionTime ?: 400) as Integer)
     sendEvent(name: "level", value: bright, unit: "%")
-    sendCommand("set_bright", [bright, "smooth", duration])
+    sendCommand("set_bright", [bright, "smooth", resolveDuration(rate)])
 }
 
 def setHue(BigDecimal hue) {
     logDebug "setHue(${hue})"
-    Integer hubHue   = clamp(Math.round(hue) as Integer, 0, 100)
-    Integer yeelightHue = Math.round(hubHue * 3.59) as Integer
-    Integer sat      = (device.currentValue("saturation") ?: 100) as Integer
-    Integer duration = Math.max(30, (transitionTime ?: 400) as Integer)
+    Integer hubHue = clamp(Math.round(hue) as Integer, 0, 100)
+    Integer sat    = (device.currentValue("saturation") ?: 100) as Integer
     sendEvent(name: "hue",       value: hubHue)
     sendEvent(name: "colorMode", value: "HSV")
-    sendCommand("set_hsv", [yeelightHue, sat, "smooth", duration])
+    sendCommand("set_hsv", [hubToYeelightHue(hubHue), sat, "smooth", resolveDuration()])
 }
 
 def setSaturation(BigDecimal saturation) {
     logDebug "setSaturation(${saturation})"
-    Integer sat      = clamp(Math.round(saturation) as Integer, 0, 100)
-    Integer hubHue   = (device.currentValue("hue") ?: 0) as Integer
-    Integer yeelightHue = Math.round(hubHue * 3.59) as Integer
-    Integer duration = Math.max(30, (transitionTime ?: 400) as Integer)
+    Integer sat    = clamp(Math.round(saturation) as Integer, 0, 100)
+    Integer hubHue = (device.currentValue("hue") ?: 0) as Integer
     sendEvent(name: "saturation", value: sat)
     sendEvent(name: "colorMode",  value: "HSV")
-    sendCommand("set_hsv", [yeelightHue, sat, "smooth", duration])
+    sendCommand("set_hsv", [hubToYeelightHue(hubHue), sat, "smooth", resolveDuration()])
 }
 
 def setColor(Map colorMap) {
     logDebug "setColor(${colorMap})"
-    Integer hubHue   = (colorMap.hue        ?: 0) as Integer
-    Integer sat      = (colorMap.saturation ?: 100) as Integer
-    Integer yeelightHue = Math.round(hubHue * 3.59) as Integer
-    Integer duration = Math.max(30, (transitionTime ?: 400) as Integer)
+    Integer hubHue = (colorMap.hue        ?: 0) as Integer
+    Integer sat    = (colorMap.saturation ?: 100) as Integer
     sendEvent(name: "hue",        value: hubHue)
     sendEvent(name: "saturation", value: sat)
     sendEvent(name: "colorMode",  value: "HSV")
-    sendCommand("set_hsv", [yeelightHue, sat, "smooth", duration])
+    sendCommand("set_hsv", [hubToYeelightHue(hubHue), sat, "smooth", resolveDuration()])
     if (colorMap.level != null) {
         setLevel(colorMap.level as BigDecimal)
     }
@@ -462,11 +454,10 @@ def setColor(Map colorMap) {
 def setColorTemperature(BigDecimal temperature, BigDecimal level = null, BigDecimal rate = null) {
     logDebug "setColorTemperature(${temperature}, ${level}, ${rate})"
 
-    Integer ct       = clamp(Math.round(temperature) as Integer, CT_MIN, CT_MAX)
-    Integer duration = rate != null ? Math.max(30, Math.round(rate * 1000) as Integer) : Math.max(30, (transitionTime ?: 400) as Integer)
+    Integer ct = clamp(Math.round(temperature) as Integer, CT_MIN, CT_MAX)
     sendEvent(name: "colorTemperature", value: ct, unit: "K")
     sendEvent(name: "colorMode",        value: "CT")
-    sendCommand("set_ct_abx", [ct, "smooth", duration])
+    sendCommand("set_ct_abx", [ct, "smooth", resolveDuration(rate)])
     if (level != null) {
         setLevel(level)
     }
@@ -503,21 +494,33 @@ def schedulePoll() {
 
 private void purgeStalePendingCmds(Map pending) {
     Long cutoff = now() - 30000
-    pending.findAll { k, v -> v.ts != null && v.ts < cutoff }.each { k, v -> pending.remove(k) }
+    pending.entrySet().removeIf { it.value.ts != null && it.value.ts < cutoff }
 }
 
 private Integer safeInteger(Object val) {
-    if (val == null || val.toString().trim() == "") return null
-    try { return val.toString().trim() as Integer } catch (e) { return null }
+    if (val == null) return null
+    String s = val.toString().trim()
+    if (s == "") return null
+    try { return s as Integer } catch (e) { return null }
 }
 
 private Long safeLong(Object val) {
-    if (val == null || val.toString().trim() == "") return null
-    try { return val.toString().trim() as Long } catch (e) { return null }
+    if (val == null) return null
+    String s = val.toString().trim()
+    if (s == "") return null
+    try { return s as Long } catch (e) { return null }
 }
 
 private Integer clamp(Integer value, Integer min, Integer max) {
     return Math.min(max, Math.max(min, value))
+}
+
+private Integer hubToYeelightHue(Integer h) { Math.round(h * HUE_SCALE) as Integer }
+private Integer yeelightToHubHue(Integer h)  { Math.round(h / HUE_SCALE) as Integer }
+
+private Integer resolveDuration(BigDecimal rate = null) {
+    rate != null ? Math.max(30, Math.round(rate * 1000) as Integer)
+                 : Math.max(30, (transitionTime ?: 400) as Integer)
 }
 
 private void setGenericColorName(Integer kelvin) {
